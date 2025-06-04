@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/DXICIDE/pokedex/internal/pokecache"
 )
 
 var commands = make(map[string]cliCommand)
@@ -35,12 +38,14 @@ type LocationAreasApi struct {
 type Config struct {
 	Next     *string
 	Previous *string
+	cache    pokecache.Cache
 }
 
 func main() {
 	// init the commands
 	commandList()
 	config := new(Config)
+	config.cache = *pokecache.NewCache(30 * time.Second)
 	//create new scanner for expected input
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -99,24 +104,42 @@ func commandHelp(cfg *Config) error {
 func commandMap(cfg *Config) error {
 	var res *http.Response
 	var err error
+	var body []byte
+	var ok bool
+
 	//if its the first one, use without offset, otherwise use the next in line
 	if cfg.Next != nil {
-		res, err = http.Get(*cfg.Next)
+		//try to find it in cache, if not use the url
+		body, ok = cfg.cache.Get(*cfg.Next)
+		if !ok {
+			res, err = http.Get(*cfg.Next)
+		}
 	} else {
-		res, err = http.Get("https://pokeapi.co/api/v2/location-area/?limit=20&offset=0")
+		body, ok = cfg.cache.Get("https://pokeapi.co/api/v2/location-area/?limit=20&offset=0")
+		if !ok {
+			res, err = http.Get("https://pokeapi.co/api/v2/location-area/?limit=20&offset=0")
+		}
 	}
 
 	if err != nil {
 		log.Fatal(err)
 	}
-	//standard json reading
-	body, err := io.ReadAll(res.Body)
-	res.Body.Close()
-	if res.StatusCode > 299 {
-		log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
+
+	//if it wasnt cached the body is read
+	if len(body) == 0 {
+		body, err = io.ReadAll(res.Body)
 	}
-	if err != nil {
-		log.Fatal(err)
+
+	//completes if it wasnt cached, added to chace and error checks
+	if res != nil {
+		cfg.cache.Add(res.Request.URL.String(), body)
+		res.Body.Close()
+		if res.StatusCode > 299 {
+			log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	//unmashaling json and inserting into structures
@@ -125,6 +148,8 @@ func commandMap(cfg *Config) error {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	//sets the config
 	cfg.Next = locationAreasApi.Next
 	cfg.Previous = locationAreasApi.Previous
 
@@ -139,8 +164,15 @@ func commandMap(cfg *Config) error {
 func commandMapb(cfg *Config) error {
 	var res *http.Response
 	var err error
+	var body []byte
+	var ok bool
+
 	if cfg.Previous != nil {
-		res, err = http.Get(*cfg.Previous)
+		//try to find it in cache, if not use the url
+		body, ok = cfg.cache.Get(*cfg.Previous)
+		if !ok {
+			res, err = http.Get(*cfg.Previous)
+		}
 	} else {
 		fmt.Println("youre on the first page, type map to print it")
 		return nil
@@ -149,21 +181,36 @@ func commandMapb(cfg *Config) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	body, err := io.ReadAll(res.Body)
-	res.Body.Close()
-	if res.StatusCode > 299 {
-		log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
+
+	//if it wasnt cached the body is read
+	if len(body) == 0 {
+		body, err = io.ReadAll(res.Body)
 	}
-	if err != nil {
-		log.Fatal(err)
+
+	//completes if it wasnt cached, added to chace and error checks
+	if res != nil {
+		cfg.cache.Add(res.Request.URL.String(), body)
+		res.Body.Close()
+		if res.StatusCode > 299 {
+			log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
+
+	//unmashaling json and inserting into structures
 	locationAreasApi := LocationAreasApi{}
 	err = json.Unmarshal(body, &locationAreasApi)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	//set the config
 	cfg.Next = locationAreasApi.Next
 	cfg.Previous = locationAreasApi.Previous
+
+	//prints the areas
 	for id := range locationAreasApi.Areas {
 		fmt.Println(locationAreasApi.Areas[id].Name)
 	}

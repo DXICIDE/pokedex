@@ -95,9 +95,11 @@ func commandHelp(cfg *Config) error {
 	return nil
 }
 
+// function for command Map
 func commandMap(cfg *Config) error {
 	var res *http.Response
 	var err error
+	//if its the first one, use without offset, otherwise use the next in line
 	if cfg.Next != nil {
 		res, err = http.Get(*cfg.Next)
 	} else {
@@ -107,6 +109,7 @@ func commandMap(cfg *Config) error {
 	if err != nil {
 		log.Fatal(err)
 	}
+	//standard json reading
 	body, err := io.ReadAll(res.Body)
 	res.Body.Close()
 	if res.StatusCode > 299 {
@@ -115,6 +118,8 @@ func commandMap(cfg *Config) error {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	//unmashaling json and inserting into structures
 	locationAreasApi := LocationAreasApi{}
 	err = json.Unmarshal(body, &locationAreasApi)
 	if err != nil {
@@ -122,19 +127,22 @@ func commandMap(cfg *Config) error {
 	}
 	cfg.Next = locationAreasApi.Next
 	cfg.Previous = locationAreasApi.Previous
+
+	//printing the areas
 	for id := range locationAreasApi.Areas {
 		fmt.Println(locationAreasApi.Areas[id].Name)
 	}
 	return nil
 }
 
+// almost exact same function as commandMap expept it goes backwards. if its on the at the start, it just print that the user is on the first page
 func commandMapb(cfg *Config) error {
 	var res *http.Response
 	var err error
 	if cfg.Previous != nil {
 		res, err = http.Get(*cfg.Previous)
 	} else {
-		fmt.Println("youre on the first page")
+		fmt.Println("youre on the first page, type map to print it")
 		return nil
 	}
 
@@ -177,7 +185,7 @@ func commandList() map[string]cliCommand {
 		},
 		"map": {
 			name:        "map",
-			description: "Displays the names of 20 locations",
+			description: "Displays the names of 20 locations and its subsequent use prints the next 20",
 			callback:    commandMap,
 		},
 		"mapb": {

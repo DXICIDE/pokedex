@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -20,7 +19,7 @@ var commands = make(map[string]cliCommand)
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(cfg *Config) error
+	callback    func(cfg *Config, input []string) error
 }
 
 type LocationArea struct {
@@ -33,6 +32,21 @@ type LocationAreasApi struct {
 	Next     *string        `json:"next"`
 	Previous *string        `json:"previous"`
 	Areas    []LocationArea `json:"results"`
+}
+
+type LocationAreaNamed struct {
+	Id                int                `json:"id"`
+	Name              string             `json:"name"`
+	PokemonEncounters []PokemonEncounter `json:"pokemon_encounters"`
+}
+
+type PokemonEncounter struct {
+	Pokemon Pokemon `json:"pokemon"`
+}
+
+type Pokemon struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 type Config struct {
@@ -62,9 +76,9 @@ func main() {
 		found := false
 		for command := range commands {
 			if input[0] == command {
-				err := commands[command].callback(config)
+				err := commands[command].callback(config, input)
 				if err != nil {
-					fmt.Printf("%v", err)
+					fmt.Printf("%v\n", err)
 				}
 				found = true
 			}
@@ -84,14 +98,14 @@ func cleanInput(text string) []string {
 }
 
 // function for exiting program
-func commandExit(cfg *Config) error {
+func commandExit(cfg *Config, input []string) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 	return nil
 }
 
 // function for printing help into stdout
-func commandHelp(cfg *Config) error {
+func commandHelp(cfg *Config, input []string) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	for _, name := range commands {
@@ -101,7 +115,7 @@ func commandHelp(cfg *Config) error {
 }
 
 // function for command Map
-func commandMap(cfg *Config) error {
+func commandMap(cfg *Config, input []string) error {
 	var res *http.Response
 	var err error
 	var body []byte
@@ -122,7 +136,7 @@ func commandMap(cfg *Config) error {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	//if it wasnt cached the body is read
@@ -135,10 +149,11 @@ func commandMap(cfg *Config) error {
 		cfg.cache.Add(res.Request.URL.String(), body)
 		res.Body.Close()
 		if res.StatusCode > 299 {
-			log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
+			err = fmt.Errorf("response failed with status code: %d and body: %s", res.StatusCode, body)
+			return err
 		}
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
 
@@ -146,7 +161,7 @@ func commandMap(cfg *Config) error {
 	locationAreasApi := LocationAreasApi{}
 	err = json.Unmarshal(body, &locationAreasApi)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	//sets the config
@@ -161,7 +176,7 @@ func commandMap(cfg *Config) error {
 }
 
 // almost exact same function as commandMap expept it goes backwards. if its on the at the start, it just print that the user is on the first page
-func commandMapb(cfg *Config) error {
+func commandMapb(cfg *Config, input []string) error {
 	var res *http.Response
 	var err error
 	var body []byte
@@ -179,7 +194,7 @@ func commandMapb(cfg *Config) error {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	//if it wasnt cached the body is read
@@ -192,10 +207,11 @@ func commandMapb(cfg *Config) error {
 		cfg.cache.Add(res.Request.URL.String(), body)
 		res.Body.Close()
 		if res.StatusCode > 299 {
-			log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
+			err = fmt.Errorf("response failed with status code: %d and body: %s", res.StatusCode, body)
+			return err
 		}
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
 
@@ -203,7 +219,7 @@ func commandMapb(cfg *Config) error {
 	locationAreasApi := LocationAreasApi{}
 	err = json.Unmarshal(body, &locationAreasApi)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	//set the config
@@ -213,6 +229,57 @@ func commandMapb(cfg *Config) error {
 	//prints the areas
 	for id := range locationAreasApi.Areas {
 		fmt.Println(locationAreasApi.Areas[id].Name)
+	}
+	return nil
+}
+
+func commandExplore(cfg *Config, input []string) error {
+	var res *http.Response
+	var err error
+	var body []byte
+	var ok bool
+
+	if len(input) < 2 {
+		err := errors.New("no location area specified")
+		return err
+	}
+
+	body, ok = cfg.cache.Get(fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%v/", input[1]))
+
+	if !ok {
+		res, err = http.Get(fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%v/", input[1]))
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("Exploring %v...\n", input[1])
+
+	if len(body) == 0 {
+		body, err = io.ReadAll(res.Body)
+	}
+
+	if res != nil {
+		cfg.cache.Add(res.Request.URL.String(), body)
+		res.Body.Close()
+		if res.StatusCode > 299 {
+			err = fmt.Errorf("response failed with status code: %d and body: %s", res.StatusCode, body)
+			return err
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	locationAreasNamed := LocationAreaNamed{}
+	err = json.Unmarshal(body, &locationAreasNamed)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Found Pokemon:")
+	for id := range locationAreasNamed.PokemonEncounters {
+		fmt.Printf(" - %v\n", locationAreasNamed.PokemonEncounters[id].Pokemon.Name)
 	}
 	return nil
 }
@@ -239,6 +306,11 @@ func commandList() map[string]cliCommand {
 			name:        "mapb",
 			description: "Displays the names of previous 20 locations",
 			callback:    commandMapb,
+		},
+		"explore": {
+			name:        "explore []",
+			description: "Lists all of the Pokemon in a location",
+			callback:    commandExplore,
 		},
 	}
 	return commands

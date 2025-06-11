@@ -2,11 +2,8 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -19,34 +16,7 @@ var commands = make(map[string]cliCommand)
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(cfg *Config, input []string) error
-}
-
-type LocationArea struct {
-	Name string `json:"name"`
-	Url  string `json:"url"`
-}
-
-type LocationAreasApi struct {
-	Count    int            `json:"count"`
-	Next     *string        `json:"next"`
-	Previous *string        `json:"previous"`
-	Areas    []LocationArea `json:"results"`
-}
-
-type LocationAreaNamed struct {
-	Id                int                `json:"id"`
-	Name              string             `json:"name"`
-	PokemonEncounters []PokemonEncounter `json:"pokemon_encounters"`
-}
-
-type PokemonEncounter struct {
-	Pokemon Pokemon `json:"pokemon"`
-}
-
-type Pokemon struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	callback    func(cfg *Config, input []string, pokedex *pokedex) error
 }
 
 type Config struct {
@@ -60,6 +30,8 @@ func main() {
 	commandList()
 	config := new(Config)
 	config.cache = *pokecache.NewCache(30 * time.Second)
+	pokedex := new(pokedex)
+	pokedex.pokemon = make(map[string]PokemonEndPoint)
 	//create new scanner for expected input
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -76,7 +48,7 @@ func main() {
 		found := false
 		for command := range commands {
 			if input[0] == command {
-				err := commands[command].callback(config, input)
+				err := commands[command].callback(config, input, pokedex)
 				if err != nil {
 					fmt.Printf("%v\n", err)
 				}
@@ -95,193 +67,6 @@ func cleanInput(text string) []string {
 	lowered := strings.ToLower(trimmed)
 	clean := strings.Fields(lowered)
 	return clean
-}
-
-// function for exiting program
-func commandExit(cfg *Config, input []string) error {
-	fmt.Println("Closing the Pokedex... Goodbye!")
-	os.Exit(0)
-	return nil
-}
-
-// function for printing help into stdout
-func commandHelp(cfg *Config, input []string) error {
-	fmt.Println("Welcome to the Pokedex!")
-	fmt.Println("Usage:")
-	for _, name := range commands {
-		fmt.Printf("%v: %v\n", name.name, name.description)
-	}
-	return nil
-}
-
-// function for command Map
-func commandMap(cfg *Config, input []string) error {
-	var res *http.Response
-	var err error
-	var body []byte
-	var ok bool
-
-	//if its the first one, use without offset, otherwise use the next in line
-	if cfg.Next != nil {
-		//try to find it in cache, if not use the url
-		body, ok = cfg.cache.Get(*cfg.Next)
-		if !ok {
-			res, err = http.Get(*cfg.Next)
-		}
-	} else {
-		body, ok = cfg.cache.Get("https://pokeapi.co/api/v2/location-area/?limit=20&offset=0")
-		if !ok {
-			res, err = http.Get("https://pokeapi.co/api/v2/location-area/?limit=20&offset=0")
-		}
-	}
-
-	if err != nil {
-		return err
-	}
-
-	//if it wasnt cached the body is read
-	if len(body) == 0 {
-		body, err = io.ReadAll(res.Body)
-	}
-
-	//completes if it wasnt cached, added to chace and error checks
-	if res != nil {
-		cfg.cache.Add(res.Request.URL.String(), body)
-		res.Body.Close()
-		if res.StatusCode > 299 {
-			err = fmt.Errorf("response failed with status code: %d and body: %s", res.StatusCode, body)
-			return err
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	//unmashaling json and inserting into structures
-	locationAreasApi := LocationAreasApi{}
-	err = json.Unmarshal(body, &locationAreasApi)
-	if err != nil {
-		return err
-	}
-
-	//sets the config
-	cfg.Next = locationAreasApi.Next
-	cfg.Previous = locationAreasApi.Previous
-
-	//printing the areas
-	for id := range locationAreasApi.Areas {
-		fmt.Println(locationAreasApi.Areas[id].Name)
-	}
-	return nil
-}
-
-// almost exact same function as commandMap expept it goes backwards. if its on the at the start, it just print that the user is on the first page
-func commandMapb(cfg *Config, input []string) error {
-	var res *http.Response
-	var err error
-	var body []byte
-	var ok bool
-
-	if cfg.Previous != nil {
-		//try to find it in cache, if not use the url
-		body, ok = cfg.cache.Get(*cfg.Previous)
-		if !ok {
-			res, err = http.Get(*cfg.Previous)
-		}
-	} else {
-		fmt.Println("youre on the first page, type map to print it")
-		return nil
-	}
-
-	if err != nil {
-		return err
-	}
-
-	//if it wasnt cached the body is read
-	if len(body) == 0 {
-		body, err = io.ReadAll(res.Body)
-	}
-
-	//completes if it wasnt cached, added to chace and error checks
-	if res != nil {
-		cfg.cache.Add(res.Request.URL.String(), body)
-		res.Body.Close()
-		if res.StatusCode > 299 {
-			err = fmt.Errorf("response failed with status code: %d and body: %s", res.StatusCode, body)
-			return err
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	//unmashaling json and inserting into structures
-	locationAreasApi := LocationAreasApi{}
-	err = json.Unmarshal(body, &locationAreasApi)
-	if err != nil {
-		return err
-	}
-
-	//set the config
-	cfg.Next = locationAreasApi.Next
-	cfg.Previous = locationAreasApi.Previous
-
-	//prints the areas
-	for id := range locationAreasApi.Areas {
-		fmt.Println(locationAreasApi.Areas[id].Name)
-	}
-	return nil
-}
-
-func commandExplore(cfg *Config, input []string) error {
-	var res *http.Response
-	var err error
-	var body []byte
-	var ok bool
-
-	if len(input) < 2 {
-		err := errors.New("no location area specified")
-		return err
-	}
-
-	body, ok = cfg.cache.Get(fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%v/", input[1]))
-
-	if !ok {
-		res, err = http.Get(fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%v/", input[1]))
-		if err != nil {
-			return err
-		}
-	}
-
-	fmt.Printf("Exploring %v...\n", input[1])
-
-	if len(body) == 0 {
-		body, err = io.ReadAll(res.Body)
-	}
-
-	if res != nil {
-		cfg.cache.Add(res.Request.URL.String(), body)
-		res.Body.Close()
-		if res.StatusCode > 299 {
-			err = fmt.Errorf("response failed with status code: %d and body: %s", res.StatusCode, body)
-			return err
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	locationAreasNamed := LocationAreaNamed{}
-	err = json.Unmarshal(body, &locationAreasNamed)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Found Pokemon:")
-	for id := range locationAreasNamed.PokemonEncounters {
-		fmt.Printf(" - %v\n", locationAreasNamed.PokemonEncounters[id].Pokemon.Name)
-	}
-	return nil
 }
 
 // collection of commands in the program
@@ -311,6 +96,16 @@ func commandList() map[string]cliCommand {
 			name:        "explore []",
 			description: "Lists all of the Pokemon in a location",
 			callback:    commandExplore,
+		},
+		"catch": {
+			name:        "catch []",
+			description: "Catches a chosen pokemon and puts him into the pokedex",
+			callback:    commandCatch,
+		},
+		"inspect": {
+			name:        "inspect []",
+			description: "inspects a caught pokemon and prints its stats",
+			callback:    commandInspect,
 		},
 	}
 	return commands

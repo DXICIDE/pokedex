@@ -13,12 +13,14 @@ type pokedex struct {
 	pokemon map[string]PokemonEndPoint
 }
 
-// function for exiting program
+// function for catching pokemon
 func commandCatch(cfg *Config, input []string, pokedex *pokedex) error {
+
 	if len(input) < 2 {
 		err := errors.New("no Pokemon specified")
 		return err
 	}
+
 	res, err := http.Get(fmt.Sprintf("https://pokeapi.co/api/v2/pokemon/%v", input[1]))
 	if err != nil {
 		return err
@@ -37,10 +39,6 @@ func commandCatch(cfg *Config, input []string, pokedex *pokedex) error {
 		return err
 	}
 
-	if err != nil {
-		return err
-	}
-
 	pokemon := PokemonEndPoint{}
 	err = json.Unmarshal(body, &pokemon)
 
@@ -48,14 +46,13 @@ func commandCatch(cfg *Config, input []string, pokedex *pokedex) error {
 		return err
 	}
 
-	catchrate := rand.Intn(400)
+	//base expirience max is 255 so theres 45 numbers above to have atlest decent chance to chatch it
+	catchrate := rand.Intn(300)
 
 	if catchrate > pokemon.BaseExperience {
 		fmt.Printf("%v was caught!\n", input[1])
+		fmt.Println("You may now inspect it with the inspect command.")
 		pokedex.pokemon[pokemon.Name] = pokemon
-		// for id := range pokedex.pokemon {
-		// 	fmt.Println(pokedex.pokemon[id].Name)
-		// }
 		return nil
 	} else {
 		fmt.Printf("%v escaped!\n", input[1])

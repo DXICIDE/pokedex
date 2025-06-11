@@ -8,6 +8,7 @@ import (
 	"net/http"
 )
 
+// func for exploring an area to see which pokemon are there, practicaly the same as command map
 func commandExplore(cfg *Config, input []string, pokedex *pokedex) error {
 	var res *http.Response
 	var err error

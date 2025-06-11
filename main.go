@@ -104,8 +104,13 @@ func commandList() map[string]cliCommand {
 		},
 		"inspect": {
 			name:        "inspect []",
-			description: "inspects a caught pokemon and prints its stats",
+			description: "Inspects a caught pokemon and prints its stats",
 			callback:    commandInspect,
+		},
+		"pokedex": {
+			name:        "pokedex []",
+			description: "Shows caught pokemon",
+			callback:    commandPokedex,
 		},
 	}
 	return commands
